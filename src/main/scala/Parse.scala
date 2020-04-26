@@ -1,6 +1,7 @@
 import org.apache.spark.sql.Dataset
 import java.text.SimpleDateFormat
 import java.util.Date
+import geotrellis.proj4._
 
 object Parse {
   val spark = SparkSessionHolder.spark
@@ -75,4 +76,48 @@ object Parse {
     CoTrajectoryUtils.getCoTrajectory(data)
   }
 
+  /* Parse the data for the synthetic CDR example and tests */
+  def syntheticCDR(dataFile: String): Dataset[Trajectory] = {
+    val data: Dataset[MeasurementID] = spark.read.format("csv")
+      .options(Map("sep" -> ",", "header" -> "true", "inferSchema" -> "true"))
+      .load(dataFile)
+      .map{ line =>
+        val id = line.getAs[Int]("trajectory_id")
+        val t = line.getAs[java.sql.Timestamp]("connection_timestamp").getTime
+        val coords = line.getAs[String]("connection_location_wkt")
+          .replace("POINT(", "").replace(")", "")
+          .split(" ")
+          .map(part => part.toDouble)
+        val x = Location(coords)
+        MeasurementID(id, Measurement(t, x))
+      }
+    
+    CoTrajectoryUtils.getCoTrajectory(data)
+  }
+  
+  /* Parse the data for the synthetic CDR example and tests 
+   * and transform location coordinates from ITM to WGS84 
+   */
+  def syntheticCDRLatLng(dataFile: String): Dataset[Trajectory] = {
+    val src = CRS.fromEpsgCode(2039)
+    val dst = LatLng
+    val transformation = Transform(src, dst)
+
+    val data: Dataset[MeasurementID] = spark.read.format("csv")
+      .options(Map("sep" -> ",", "header" -> "true", "inferSchema" -> "true"))
+      .load(dataFile)
+      .map{ line =>
+        val id = line.getAs[Int]("trajectory_id")
+        val t = line.getAs[java.sql.Timestamp]("connection_timestamp").getTime
+        val coords = line.getAs[String]("connection_location_wkt")
+          .replace("POINT(", "").replace(")", "")
+          .split(" ")
+          .map(part => part.toDouble)
+        val (lat, lng) = transformation(coords(0), coords(1))
+        val x = Location(Array(lat, lng))
+        MeasurementID(id, Measurement(t, x))
+      }
+
+    CoTrajectoryUtils.getCoTrajectory(data)
+  }
 }
